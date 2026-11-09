@@ -1,0 +1,67 @@
+name: Offline SDK checks
+
+on:
+  push:
+    branches: ["validation/offline-sdk"]
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: ${{ matrix.contribution.name }} / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.13", "3.14"]
+        contribution:
+          - name: timeout
+            revision: 38f9b79a3e986df48d8b8476a5dce55927325075
+          - name: gemini
+            revision: 6b806692300b0079adce3652dc9f910638c1a3e7
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.contribution.revision }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install SDK and test tools
+        run: python -m pip install -e . pytest pytest-asyncio pytest-xdist python-dateutil ruff==0.11.5 mypy==1.13.0 build
+      - name: Run offline SDK tests
+        shell: bash
+        run: |
+          tests=(
+            tests/test_client_headers.py tests/test_client_types.py tests/test_client_tools.py
+            tests/test_flows_create_and_wait.py tests/agent_workflows tests/test_url_utils.py
+            tests/test_music_multipart.py tests/test_realtime_close_event.py tests/test_realtime_tts_params.py
+            tests/test_speech_engine_auth.py tests/test_speech_engine_custom.py
+            tests/test_speech_engine_resource.py tests/test_speech_engine_server.py
+            tests/test_speech_engine_session.py tests/test_webhooks.py
+          )
+          if test -f tests/test_client_timeout.py; then
+            tests+=(tests/test_client_timeout.py)
+          fi
+          python -m pytest "${tests[@]}" -q
+      - name: Check contribution tests
+        shell: bash
+        run: |
+          if test -f tests/test_client_timeout.py; then
+            ruff check tests/test_client_timeout.py
+          else
+            ruff check tests/test_speech_engine_session.py
+          fi
+      - name: Check types
+        if: matrix.python-version == '3.8'
+        shell: bash
+        run: |
+          files=(src/elevenlabs/client.py src/elevenlabs/speech_engine/session.py tests/test_speech_engine_session.py)
+          if test -f tests/test_client_timeout.py; then
+            files+=(tests/test_client_timeout.py)
+          fi
+          python -m mypy "${files[@]}"
+      - name: Build wheel
+        if: matrix.python-version == '3.13'
+        run: python -m build --wheel
